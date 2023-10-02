@@ -1,8 +1,8 @@
 const express = require("express");
-
 const Joi = require("joi");
-
 const router = express.Router();
+const authMiddleware = require("../../middleware/authMiddleware");
+const contact = require("../../models/contactModel");
 
 const {
   listContacts,
@@ -88,6 +88,60 @@ router.put("/:contactId", async (req, res, next) => {
     res.json(updatedContact);
   } catch (error) {
     next(error);
+  }
+});
+
+router.get("/contacts", authMiddleware, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const startIndex = (page - 1) * limit;
+    const endIndex = page * limit;
+
+    const results = {};
+
+    const countDocuments = await contact.countDocuments().exec();
+
+    if (endIndex < countDocuments) {
+      results.next = {
+        page: page + 1,
+        limit: limit,
+      };
+    }
+
+    if (startIndex > 0) {
+      results.previous = {
+        page: page - 1,
+        limit: limit,
+      };
+    }
+
+    results.results = await contact.find().limit(limit).skip(startIndex).exec();
+
+    res.status(200).json(results);
+  } catch (error) {
+    console.error("Error in /contacts:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.get("/contacts", authMiddleware, async (req, res) => {
+  try {
+    const favorite = req.query.favorite;
+
+    let filteredContacts;
+
+    if (favorite === "true") {
+      filteredContacts = await contact.find({ favorite: true }).exec();
+    } else {
+      filteredContacts = await contact.find().exec();
+    }
+
+    res.status(200).json(filteredContacts);
+  } catch (error) {
+    console.error("Error in /contacts:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 
