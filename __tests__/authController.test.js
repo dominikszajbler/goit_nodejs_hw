@@ -11,6 +11,7 @@ describe('POST /signin', () => {
    jest.setTimeout(30000);
 
   it('should return a token and user object with email and subscription', async () => {
+    try {
     const userData = {
       email: 'test@example.com',
       password: 'testpassword',
@@ -30,5 +31,8 @@ describe('POST /signin', () => {
     expect(typeof res.body.user.email).toBe('string');
     expect(res.body.user).toHaveProperty('subscription');
     expect(typeof res.body.user.subscription).toBe('string');
-  });
+  } catch (error) {
+    throw error;
+  }
+});
 });
