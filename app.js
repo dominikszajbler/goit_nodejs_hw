@@ -4,7 +4,8 @@ const cors = require('cors')
 const contactsRouter = require('./routes/api/contacts')
 const dbConnect = require('./db');
 
-const app = express()
+const app = express();
+const path = require('path');
 
 const formatsLogger = app.get('env') === 'development' ? 'dev' : 'short'
 
@@ -22,5 +23,7 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   res.status(500).json({ message: err.message })
 })
+
+app.use('/avatars', express.static(path.join(__dirname, 'public', 'avatars')));
 
 module.exports = app

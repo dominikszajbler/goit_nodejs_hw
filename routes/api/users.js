@@ -4,9 +4,16 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Joi = require("joi");
 const User = require("../../models/userModel");
+const gravatar = require("gravatar");
+const multer = require("multer");
+const Jimp = require("jimp");
+const path = require("path");
 require("dotenv").config();
 const jwtSecret = process.env.JWT_SECRET;
 const authMiddleware = require("../../middleware/authMiddleware");
+
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 router.post("/signup", async (req, res) => {
   try {
@@ -35,15 +42,20 @@ router.post("/signup", async (req, res) => {
     const newUser = new User({
       email: req.body.email,
       password: hashedPassword,
+      avatarURL: avatarURL,
     });
 
     await newUser.save();
 
-    res
-      .status(201)
-      .json({
-        user: { email: newUser.email, subscription: newUser.subscription },
-      });
+    const avatarURL = newUser.avatarURL;
+
+    res.status(201).json({
+      user: {
+        email: newUser.email,
+        subscription: newUser.subscription,
+        avatarURL: newUser.avatarURL,
+      },
+    });
   } catch (error) {
     console.error("Error in /users/signup:", error);
     res.status(500).json({ message: "Internal server error" });
@@ -87,74 +99,97 @@ router.post("/login", async (req, res) => {
     user.token = token;
     await user.save();
 
-    res
-      .status(200)
-      .json({
-        token,
-        user: { email: user.email, subscription: user.subscription },
-      });
+    res.status(200).json({
+      token,
+      user: { email: user.email, subscription: user.subscription },
+    });
   } catch (error) {
     console.error("Error in /users/login:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
-router.get('/protected-route', authMiddleware, (req, res) => {
-  res.json({ message: 'This is a protected route', user: req.user });
-  });
-
-router.get('/logout', authMiddleware, async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const user = await User.findById(userId);
-        if(!user) {
-            return res.statur(401).json({ message: 'Not authorized' });
-        }
-        user.token = null;
-        await user.save();
-        res.status(204).send();
-    } catch (error) {
-        console.error("Error in /users/logout:", error);
-        res.status(500).json({ message: "Internal server error" });
-    }
+router.get("/protected-route", authMiddleware, (req, res) => {
+  res.json({ message: "This is a protected route", user: req.user });
 });
 
-router.get('/current', authMiddleware, async (req, res) => {
+router.get("/logout", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.statur(401).json({ message: "Not authorized" });
+    }
+    user.token = null;
+    await user.save();
+    res.status(204).send();
+  } catch (error) {
+    console.error("Error in /users/logout:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.get("/current", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(401).json({ message: "Not authorized" });
+    }
+
+    const { email, subscription } = user;
+    res.status(200).json({ email, subscription });
+  } catch (error) {
+    console.error("Error in /users/current:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.patch("/users", authMiddleware, async (req, res) => {
+  try {
+    const { subscription } = req.body;
+
+    const allowedSubscriptions = ["starter", "pro", "business"];
+
+    if (!allowedSubscriptions.includes(subscription)) {
+      return res.status(400).json({ message: "Invalid subscription value" });
+    }
+
+    req.user.subscription = subscription;
+    await req.user.save();
+
+    res.status(200).json({ message: "Subscription updated successfully" });
+  } catch (error) {
+    console.error("Error in /users:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+router.patch(
+  "/avatars",
+  authMiddleware,
+  upload.single("avatar"),
+  async (req, res) => {
     try {
-      const userId = req.user._id;
-      const user = await User.findById(userId);
-  
-      if (!user) {
-        return res.status(401).json({ message: 'Not authorized' });
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
       }
-  
-      const { email, subscription } = user;
-      res.status(200).json({ email, subscription });
+      const image = await Jimp.read(req.file.buffer);
+      await image.cover(250, 250).quality(90);
+      const fileName = `${req.user._id}${path.extname(req.file.originalname)}`;
+      await image.writeAsync(`tmp/${fileName}`);
+      const oldPath = path.join(__dirname, "../../tmp", fileName);
+      const newPath = path.join(__dirname, "../../public/avatars", fileName);
+      await fs.promises.rename(oldPath, newPath);
+      req.user.avatarURL = `/avatars/${fileName}`;
+      await req.user.save();
+
+      res.status(200).json({ avatarURL: req.user.avatarURL });
     } catch (error) {
-      console.error("Error in /users/current:", error);
+      console.error("Error in /users/avatars:", error);
       res.status(500).json({ message: "Internal server error" });
     }
-  });
-
-  router.patch('/users', authMiddleware, async (req, res) => {
-    try {
-      const { subscription } = req.body;
-  
-      const allowedSubscriptions = ['starter', 'pro', 'business'];
-  
-      if (!allowedSubscriptions.includes(subscription)) {
-        return res
-          .status(400)
-          .json({ message: 'Invalid subscription value' });
-      }
-  
-      req.user.subscription = subscription;
-      await req.user.save();
-  
-      res.status(200).json({ message: 'Subscription updated successfully' });
-    } catch (error) {
-      console.error('Error in /users:', error);
-      res.status(500).json({ message: 'Internal server error' });
-    }
-  });  
+  }
+);
 
 module.exports = router;
