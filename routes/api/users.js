@@ -11,6 +11,10 @@ const path = require("path");
 require("dotenv").config();
 const jwtSecret = process.env.JWT_SECRET;
 const authMiddleware = require("../../middleware/authMiddleware");
+const sgMail = require("@sendgrid/mail");
+const { nanoid } = require("nanoid");
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
@@ -191,5 +195,55 @@ router.patch(
     }
   }
 );
+
+router.get("/verify/:verificationToken", async (req, res) => {
+  const { verificationToken } = req.params;
+
+  try {
+    const user = await User.finOne({ verificationToken });
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    user.verificationToken = null;
+    user.verify = true;
+    await user.save();
+    return res.status(200).json({ message: "Verification successful" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+});
+
+router.post("/users/verify", authMiddleware, async (req, res) => {
+  try {
+    const user = req.user;
+
+    if (user.verify) {
+      return res
+        .status(400)
+        .json({ message: "Verification has already been passed" });
+    }
+
+    const verificationToken = nanoid();
+
+    user.verificationToken = verificationToken;
+    await user.save();
+
+    const msg = {
+      to: user.email,
+      from: "noreply@example.com",
+      subject: "Email Verification",
+      text: "To verify your email, click the following link:",
+      html: `<a href="${process.env.BASE_URL}/users/verify/${verificationToken}">Click here to verify your email</a>`,
+    };
+
+    sgMail.send(msg);
+
+    return res.status(200).json({ message: "Verification email sent" });
+  } catch (error) {
+    console.error("Error in /users/verify:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
 
 module.exports = router;
